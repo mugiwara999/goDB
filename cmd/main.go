@@ -14,6 +14,7 @@ var (
 	ErrorWritingToFile = fmt.Errorf("Error writing to file")
 	ErrorReadingFile   = fmt.Errorf("Error reading file")
 	ErrorTakingInput   = fmt.Errorf("Error taking input")
+	ErrorInvalidInput  = fmt.Errorf("Invalid input")
 )
 var file *os.File = nil
 var cols [][]byte = [][]byte{}
@@ -98,6 +99,11 @@ func insertRows(scanner *bufio.Scanner) {
 
 		if text == "exit" {
 			return
+		}
+
+		if strings.Count(text, ",") != len(cols)-1 {
+			fmt.Println(ErrorInvalidInput, "Expected", len(cols), "values but got", strings.Count(text, ",")+1)
+			continue
 		}
 
 		_, err := file.WriteString(text + "\n")
