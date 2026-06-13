@@ -2,10 +2,10 @@ package main
 
 import (
 	"bufio"
-	"fmt"
-	// "log"
 	"bytes"
+	"fmt"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -19,6 +19,11 @@ var (
 var file *os.File = nil
 var cols [][]byte = [][]byte{}
 var scanner *bufio.Scanner
+
+type colEq struct {
+	colIdx int
+	value  []byte
+}
 
 func createTable(scanner *bufio.Scanner) *os.File {
 
@@ -118,7 +123,7 @@ func insertRows(scanner *bufio.Scanner) {
 	}
 }
 
-func selectRows() {
+func selectRows(colEquals []colEq) {
 	file.Seek(0, 0)
 
 	scanner := bufio.NewScanner(file)
@@ -133,7 +138,40 @@ func selectRows() {
 			fmt.Println(ErrorReadingFile, scanner.Err())
 			return
 		}
-		fmt.Println(scanner.Text())
+
+		text := scanner.Bytes()
+		match := true
+
+		for _, x := range colEquals {
+			temp := text
+			currComma := 0
+
+			if !match {
+				break
+			}
+
+			for currComma != x.colIdx {
+
+				ind := bytes.Index(temp, []byte(","))
+				temp = temp[ind+1:]
+
+			}
+
+			n := bytes.Index(temp, []byte(","))
+			if n == -1 {
+				n = len(temp)
+			}
+
+			if string(x.value) != string(temp[:n]) {
+				match = !match
+			}
+
+		}
+
+		if match {
+			fmt.Println(string(text))
+		}
+
 	}
 
 }
@@ -223,7 +261,40 @@ func main() {
 		case "insert":
 			insertRows(scanner)
 		case "select":
-			selectRows()
+			fmt.Println("Enter column name and value to filter by in the format 'column=value' (type 'exit' to finish)")
+			var colEquals []colEq
+			for scanner.Scan() {
+				text := scanner.Text()
+
+				if text == "exit" {
+					slices.SortFunc(colEquals, func(a, b colEq) int {
+
+						return a.colIdx - b.colIdx
+
+					})
+					selectRows(colEquals)
+					break
+				}
+
+				parts := strings.SplitN(text, "=", 2)
+				if len(parts) != 2 {
+					fmt.Println(ErrorInvalidInput, "Expected format 'column=value'")
+					continue
+				}
+
+				colName := []byte(parts[0])
+				colIdx := slices.IndexFunc(cols, func(c []byte) bool {
+					return bytes.Equal(c, colName)
+				})
+
+				x := colEq{
+					colIdx: colIdx,
+					value:  []byte(parts[1]),
+				}
+
+				colEquals = append(colEquals, x)
+			}
+
 		case "delete":
 			deleteRows()
 		}
