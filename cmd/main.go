@@ -154,6 +154,7 @@ func selectRows(colEquals []colEq) {
 
 				ind := bytes.Index(temp, []byte(","))
 				temp = temp[ind+1:]
+				currComma++
 
 			}
 
