@@ -160,6 +160,10 @@ func main() {
 
 				colName := parts[0]
 				colIdx := slices.Index(tableInstance.GetColumns(), colName)
+				if colIdx == -1 {
+					fmt.Println(table.ErrorInvalidInput, "Column name not found")
+					continue
+				}
 				x := table.ColEq{
 					ColIdx: colIdx,
 					Value:  parts[1],
@@ -169,9 +173,45 @@ func main() {
 			}
 
 		case "delete":
-			err := tableInstance.Delete()
-			if err != nil {
-				fmt.Println(err)
+
+			fmt.Println("Enter column name and value to filter by in the format 'column=value (type 'exit' to finish)")
+			var colEquals []table.ColEq
+			for scanner.Scan() {
+				text := scanner.Text()
+
+				if text == "exit" {
+					slices.SortFunc(colEquals, func(a, b table.ColEq) int {
+						return a.ColIdx - b.ColIdx
+
+					})
+					err := tableInstance.Delete(colEquals)
+
+					if err != nil {
+						fmt.Println(err)
+						break
+					}
+
+					break
+				}
+
+				parts := strings.SplitN(text, "=", 2)
+				if len(parts) != 2 {
+					fmt.Println(table.ErrorInvalidInput, "Expected format 'column=value'")
+					continue
+				}
+
+				colName := parts[0]
+				colIdx := slices.Index(tableInstance.GetColumns(), colName)
+				if colIdx == -1 {
+					fmt.Println(table.ErrorInvalidInput, "Column name not found")
+					continue
+				}
+				x := table.ColEq{
+					ColIdx: colIdx,
+					Value:  parts[1],
+				}
+
+				colEquals = append(colEquals, x)
 			}
 		}
 		fmt.Println("Enter 'insert' or 'delete' or 'select' or 'exit' to perform operations on the table")
