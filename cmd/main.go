@@ -190,7 +190,7 @@ func main() {
 						fmt.Println(err)
 						break
 					}
-
+					fmt.Println("Deletion successful")
 					break
 				}
 
