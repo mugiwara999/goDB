@@ -32,7 +32,7 @@ func Open(name string) (*Table, error) {
 	} else {
 		DataDir = os.Getenv("DATA_DIR")
 	}
-	file, err := os.OpenFile(DataDir+"/"+name+".txt", os.O_APPEND|os.O_RDWR, 0644)
+	file, err := os.OpenFile(DataDir+"/"+strings.ToLower(name)+".txt", os.O_APPEND|os.O_RDWR, 0644)
 
 	if err != nil {
 		return nil, err
@@ -62,7 +62,7 @@ func Create(name string, cols []string) (*Table, error) {
 	} else {
 		DataDir = os.Getenv("DATA_DIR")
 	}
-	file, err := os.Create(DataDir + "/" + name + ".txt")
+	file, err := os.Create(DataDir + "/" + strings.ToLower(name) + ".txt")
 
 	if err != nil {
 		return nil, fmt.Errorf(ErrorCreatingFile.Error(), err)
