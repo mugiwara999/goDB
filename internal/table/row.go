@@ -10,6 +10,11 @@ type ColEq struct {
 	Value  string
 }
 
+type UpdateValue struct {
+	ColIdx int
+	Value  string
+}
+
 func (t *Table) GetColumns() []string {
 	return t.cols
 }
@@ -43,6 +48,9 @@ func (t *Table) Select(columns []string, colEquals []ColEq) ([][]string, error) 
 		}
 	}
 
+	fileScanner.Scan() // Skip the first line (column names)
+	result = append(result, columns)
+
 	for fileScanner.Scan() {
 		rowText := fileScanner.Text()
 		row := strings.Split(rowText, ",")
@@ -74,7 +82,45 @@ func (t *Table) Select(columns []string, colEquals []ColEq) ([][]string, error) 
 	return result, nil
 }
 
-func (t *Table) Delete() error {
+func (t *Table) Delete(filters []ColEq) error {
+	t.file.Seek(0, 0)
+	filescanner := bufio.NewScanner(t.file)
+
+	if filescanner.Err() != nil {
+		return filescanner.Err()
+	}
+
+	var rows [][]string
+
+	filescanner.Scan() // Skip the first line (column names)
+	for filescanner.Scan() {
+		rowText := filescanner.Text()
+		row := strings.Split(rowText, ",")
+
+		match := true
+		for _, v := range filters {
+			if row[v.ColIdx] != v.Value {
+
+				match = false
+			}
+		}
+
+		if !match {
+			rows = append(rows, row)
+		}
+	}
+	err := t.Truncate()
+
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		t.file.WriteString(strings.Join(row, ",") + "\n")
+	}
+	return nil
+}
+
+func (t *Table) Truncate() error {
 
 	err := t.file.Truncate(0)
 	if err != nil {
@@ -88,6 +134,59 @@ func (t *Table) Delete() error {
 
 	if err != nil {
 		return err
+	}
+	return nil
+}
+
+func (t *Table) Update(filters []ColEq, toUpdate []UpdateValue) error {
+
+	var rows [][]string
+
+	t.file.Seek(0, 0)
+
+	filescanner := bufio.NewScanner(t.file)
+
+	if filescanner.Err() != nil {
+		return filescanner.Err()
+	}
+
+	filescanner.Scan()
+
+	for filescanner.Scan() {
+
+		text := filescanner.Text()
+
+		row := strings.Split(text, ",")
+
+		match := true
+
+		for _, v := range filters {
+
+			if row[v.ColIdx] != v.Value {
+				match = false
+				break
+			}
+
+		}
+
+		if match {
+
+			for _, v := range toUpdate {
+				row[v.ColIdx] = v.Value
+			}
+
+		}
+
+		rows = append(rows, row)
+	}
+
+	err := t.Truncate()
+
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		t.file.WriteString(strings.Join(row, ",") + "\n")
 	}
 	return nil
 }

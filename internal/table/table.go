@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/joho/godotenv"
 )
 
 type Table struct {
@@ -22,7 +24,15 @@ var (
 
 func Open(name string) (*Table, error) {
 
-	file, err := os.OpenFile("../data/"+name+".txt", os.O_APPEND|os.O_RDWR, 0644)
+	err := godotenv.Load()
+	var DataDir string
+
+	if err != nil {
+		DataDir = "../data"
+	} else {
+		DataDir = os.Getenv("DATA_DIR")
+	}
+	file, err := os.OpenFile(DataDir+"/"+name+".txt", os.O_APPEND|os.O_RDWR, 0644)
 
 	if err != nil {
 		return nil, err
@@ -44,7 +54,15 @@ func Open(name string) (*Table, error) {
 }
 func Create(name string, cols []string) (*Table, error) {
 
-	file, err := os.Create("../data/" + name + ".txt")
+	err := godotenv.Load()
+	var DataDir string
+
+	if err != nil {
+		DataDir = "../data"
+	} else {
+		DataDir = os.Getenv("DATA_DIR")
+	}
+	file, err := os.Create(DataDir + "/" + name + ".txt")
 
 	if err != nil {
 		return nil, fmt.Errorf(ErrorCreatingFile.Error(), err)
