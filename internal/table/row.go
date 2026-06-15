@@ -35,6 +35,10 @@ func (t *Table) Select(columns []string, colEquals []ColEq) ([][]string, error) 
 		return nil, fileScanner.Err()
 	}
 
+	if len(columns) > 0 && columns[0] == "*" {
+		columns = t.GetColumns()
+	}
+
 	colSet := make(map[string]struct{})
 	colIdxSet := make(map[int]struct{})
 
