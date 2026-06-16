@@ -49,6 +49,8 @@ func (t *Table) Select(columns []string, colEquals []ColEq) ([][]string, error) 
 	for i, v := range t.cols {
 		if _, ok := colSet[v]; ok {
 			colIdxSet[i] = struct{}{}
+		} else {
+			return nil, ErrorColumnNotFound
 		}
 	}
 

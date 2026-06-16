@@ -37,24 +37,47 @@ func Parse(input string) (*Query, error) {
 		return nil, nil
 
 	case "select":
+		pos := 0
+		curr := 0
 		query.Type = "select"
-		query.Table = tokens[3]
+		curr++
+		pos++
+		// query.Table = tokens[3]
 		if tokens[1] == "*" {
 			query.Columns = []string{"*"}
+			pos++
+			curr++
 		} else {
-			query.Columns = strings.Split(tokens[1], ",")
+			for curr < len(tokens)-1 && tokens[curr+1] != "from" {
+				curr++
+			}
+			query.Columns = strings.Split(strings.Join(tokens[pos:curr+1], ""), ",")
+			pos++
+			curr++
 		}
+		if curr >= len(tokens) || tokens[curr] != "from" {
+			return nil, table.ErrorInvalidInput
+		}
+		curr++
+		pos++
+		if curr >= len(tokens) {
+			return nil, table.ErrorInvalidInput
+		}
+		query.Table = tokens[curr]
+		curr++
+
 		query.Filters = []Pair{}
-		if len(tokens) > 4 && tokens[4] == "where" {
+		if len(tokens) > curr && tokens[curr] == "where" {
 			// assuming only AND conditions
 
-			for i := 5; i < len(tokens); i += 2 {
+			for i := curr + 1; i < len(tokens); i += 2 {
 
 				colName, colValue, ok := strings.Cut(tokens[i], "=")
 
 				if !ok {
 					return nil, table.ErrorInvalidInput
 				}
+				curr = i
 				query.Filters = append(query.Filters, Pair{colName, colValue})
 
 			}

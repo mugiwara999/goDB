@@ -56,6 +56,8 @@ func main() {
 				colIdx := slices.Index(tableInstance.GetColumns(), v.ColName)
 				if colIdx == -1 {
 					fmt.Println(table.ErrorInvalidInput, "Invalid column name", v.ColName)
+					fmt.Print(">")
+					continue
 				}
 				x := table.ColEq{
 					ColIdx: colIdx,
@@ -66,6 +68,7 @@ func main() {
 			res, err := tableInstance.Select(query.Columns, filters)
 			if err != nil {
 				fmt.Println("Error selecting data:", err)
+				fmt.Print(">")
 				continue
 			}
 			for _, row := range res {

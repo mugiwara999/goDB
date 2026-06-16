@@ -15,11 +15,12 @@ type Table struct {
 }
 
 var (
-	ErrorCreatingFile  = fmt.Errorf("Error creating file")
-	ErrorWritingToFile = fmt.Errorf("Error writing to file")
-	ErrorReadingFile   = fmt.Errorf("Error reading file")
-	ErrorTakingInput   = fmt.Errorf("Error taking input")
-	ErrorInvalidInput  = fmt.Errorf("Invalid input")
+	ErrorCreatingFile   = fmt.Errorf("Error creating file")
+	ErrorWritingToFile  = fmt.Errorf("Error writing to file")
+	ErrorReadingFile    = fmt.Errorf("Error reading file")
+	ErrorTakingInput    = fmt.Errorf("Error taking input")
+	ErrorInvalidInput   = fmt.Errorf("Invalid input")
+	ErrorColumnNotFound = fmt.Errorf("Column not found")
 )
 
 func Open(name string) (*Table, error) {
