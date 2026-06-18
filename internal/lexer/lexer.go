@@ -87,13 +87,16 @@ func (l *Lexer) readString() Token {
 		l.pos++
 	}
 	val := l.input[start:l.pos]
+	if l.input[l.pos] != '\'' {
+		return Token{TOKEN_ILLEGAL, "unterminated string"}
+	}
 	l.pos++ // skip closing '
 	return Token{TOKEN_STRING, val}
 }
 
 func (l *Lexer) readKeywordOrIdent() Token {
 	start := l.pos
-	for l.pos < len(l.input) && isLetter(l.input[l.pos]) {
+	for l.pos < len(l.input) && isIdentChar(l.input[l.pos]) {
 		l.pos++
 	}
 	word := strings.ToLower(l.input[start:l.pos])
@@ -137,4 +140,8 @@ func isLetter(ch byte) bool {
 
 func isDigit(ch byte) bool {
 	return ch >= '0' && ch <= '9'
+}
+
+func isIdentChar(ch byte) bool {
+	return isLetter(ch) || isDigit(ch)
 }
