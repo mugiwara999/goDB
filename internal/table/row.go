@@ -2,6 +2,7 @@ package table
 
 import (
 	"bufio"
+	// "fmt"
 	"strings"
 )
 
@@ -38,20 +39,23 @@ func (t *Table) Select(columns []string, colEquals []ColEq) ([][]string, error) 
 	if len(columns) > 0 && columns[0] == "*" {
 		columns = t.GetColumns()
 	}
-
+	colMap := make(map[string]int)
 	colSet := make(map[string]struct{})
 	colIdxSet := make(map[int]struct{})
 
 	for _, col := range columns {
 		colSet[col] = struct{}{}
 	}
+	for i, col := range t.cols {
+		colMap[col] = i
+	}
 
-	for i, v := range t.cols {
-		if _, ok := colSet[v]; ok {
-			colIdxSet[i] = struct{}{}
-		} else {
+	for _, col := range columns {
+		idx, ok := colMap[col]
+		if !ok {
 			return nil, ErrorColumnNotFound
 		}
+		colIdxSet[idx] = struct{}{}
 	}
 
 	fileScanner.Scan() // Skip the first line (column names)
