@@ -25,6 +25,31 @@ type Query struct {
 	Updates []Pair
 }
 
+func parseFilters(l *lexer.Lexer, token lexer.Token) ([]Pair, error) {
+	filters := make([]Pair, 0)
+	for token.Type != lexer.TOKEN_EOF {
+		if token.Type == lexer.TOKEN_AND {
+			token = l.NextToken()
+		}
+		if token.Type != lexer.TOKEN_IDENT {
+			return nil, ErrorInvalidSyntax
+		}
+		colName := token.Value
+		token = l.NextToken()
+		if token.Type != lexer.TOKEN_EQ {
+			return nil, ErrorInvalidSyntax
+		}
+		token = l.NextToken()
+		if token.Type != lexer.TOKEN_IDENT && token.Type != lexer.TOKEN_STRING && token.Type != lexer.TOKEN_NUMBER {
+			return nil, ErrorInvalidSyntax
+		}
+		colValue := token.Value
+		token = l.NextToken()
+		filters = append(filters, Pair{colName, colValue})
+	}
+	return filters, nil
+}
+
 func Parse(input string) (*Query, error) {
 	l := lexer.New(input)
 
@@ -89,18 +114,133 @@ func Parse(input string) (*Query, error) {
 
 		token = l.NextToken()
 
-		filters := make([]Pair, 0)
+		filters, err := parseFilters(l, token)
+		if err != nil {
+			return nil, err
+		}
+
+		query.Filters = filters
+		return query, nil
+
+	case lexer.TOKEN_DELETE:
+		query.Type = "delete"
+
+		token = l.NextToken()
+
+		if token.Type != lexer.TOKEN_FROM {
+			return nil, ErrorInvalidSyntax
+		}
+
+		token = l.NextToken()
+
+		if token.Type != lexer.TOKEN_IDENT {
+			return nil, ErrorInvalidSyntax
+		}
+
+		query.Table = token.Value
+
+		token = l.NextToken()
+
+		if token.Type == lexer.TOKEN_EOF {
+			return query, nil
+		}
+
+		if token.Type != lexer.TOKEN_WHERE {
+			return nil, ErrorInvalidSyntax
+		}
+
+		token = l.NextToken()
+
+		filters, err := parseFilters(l, token)
+		if err != nil {
+			return nil, err
+		}
+
+		query.Filters = filters
+		return query, nil
+
+	case lexer.TOKEN_INSERT:
+
+		token = l.NextToken()
+
+		if token.Type != lexer.TOKEN_INTO {
+			return nil, ErrorInvalidSyntax
+		}
+
+		token = l.NextToken()
+
+		if token.Type != lexer.TOKEN_IDENT {
+			return nil, ErrorInvalidSyntax
+		}
+
+		query.Table = token.Value
+
+		token = l.NextToken()
+
+		if token.Type != lexer.TOKEN_VALUES {
+			return nil, ErrorInvalidSyntax
+		}
+
+		values := make([]string, 0)
+
+		token = l.NextToken()
 
 		for token.Type != lexer.TOKEN_EOF {
 
-			if token.Type == lexer.TOKEN_AND {
+			if token.Type == lexer.TOKEN_COMMA {
 				token = l.NextToken()
+				continue
+			}
+
+			// we have to be careful with words like select, since they will give a token type of TOKEN_SELECT
+
+			if token.Type == lexer.TOKEN_EOF {
+				break
+			}
+
+			values = append(values, token.Value)
+
+			token = l.NextToken()
+		}
+
+		query.Values = values
+
+		return query, nil
+
+		// update table set col1=value1, col2=value2 where name1=value1 and name2=value2
+	case lexer.TOKEN_UPDATE:
+		query.Type = "update"
+
+		token = l.NextToken()
+
+		if token.Type != lexer.TOKEN_IDENT {
+			return nil, ErrorInvalidSyntax
+		}
+
+		query.Table = token.Value
+
+		token = l.NextToken()
+
+		if token.Type != lexer.TOKEN_SET {
+			return nil, ErrorInvalidSyntax
+		}
+
+		token = l.NextToken()
+		updates := make([]Pair, 0)
+
+		for token.Type != lexer.TOKEN_EOF && token.Type != lexer.TOKEN_WHERE {
+
+			if token.Type == lexer.TOKEN_COMMA {
+				token = l.NextToken()
+				continue
 			}
 
 			if token.Type != lexer.TOKEN_IDENT {
 				return nil, ErrorInvalidSyntax
 			}
+
 			colName := token.Value
+
 			token = l.NextToken()
 
 			if token.Type != lexer.TOKEN_EQ {
@@ -109,23 +249,18 @@ func Parse(input string) (*Query, error) {
 
 			token = l.NextToken()
 
-			if token.Type != lexer.TOKEN_IDENT {
+			if token.Type != lexer.TOKEN_IDENT && token.Type != lexer.TOKEN_STRING && token.Type != lexer.TOKEN_NUMBER {
 				return nil, ErrorInvalidSyntax
 			}
 
 			colValue := token.Value
 
+			updates = append(updates, Pair{colName, colValue})
+
 			token = l.NextToken()
-
-			filters = append(filters, Pair{colName, colValue})
 		}
 
-		if token.Type != lexer.TOKEN_EOF {
-			return nil, ErrorInvalidSyntax
-		}
-
-		query.Filters = filters
-		return query, nil
+		query.Updates = updates
 
 	}
 	return nil, nil
