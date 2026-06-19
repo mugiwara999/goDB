@@ -44,7 +44,7 @@ func main() {
 			continue
 		}
 		tableInstance, err = table.Open(query.Table)
-		if err != nil {
+		if err != nil && query.Type != "create" {
 			fmt.Println("Error opening table:", err)
 			fmt.Print(">")
 			continue
@@ -184,7 +184,6 @@ func main() {
 				fmt.Print(">")
 				continue
 			}
-			tableInstance.Close()
 
 		}
 		fmt.Print(">")

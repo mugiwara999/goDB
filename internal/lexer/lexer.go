@@ -23,6 +23,10 @@ const (
 	TOKEN_NUMBER
 	TOKEN_EOF
 	TOKEN_ILLEGAL
+	TOKEN_CREATE
+	TOKEN_TABLE
+	TOKEN_LPAREN // (
+	TOKEN_RPAREN //
 )
 
 type Token struct {
@@ -58,6 +62,12 @@ func (l *Lexer) NextToken() Token {
 	case ',':
 		l.pos++
 		return Token{TOKEN_COMMA, ","}
+	case '(':
+		l.pos++
+		return Token{TOKEN_LPAREN, "("}
+	case ')':
+		l.pos++
+		return Token{TOKEN_RPAREN, ")"}
 	case '\'':
 		return l.readString()
 	}
@@ -101,6 +111,10 @@ func (l *Lexer) readKeywordOrIdent() Token {
 	}
 	word := strings.ToLower(l.input[start:l.pos])
 	switch word {
+	case "create":
+		return Token{TOKEN_CREATE, word}
+	case "table":
+		return Token{TOKEN_TABLE, word}
 	case "select":
 		return Token{TOKEN_SELECT, word}
 	case "insert":

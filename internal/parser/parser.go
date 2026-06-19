@@ -57,7 +57,52 @@ func Parse(input string) (*Query, error) {
 
 	token := l.NextToken()
 
+	// create table table_name (col1,col2,col3)
 	switch token.Type {
+	case lexer.TOKEN_CREATE:
+		query.Type = "create"
+
+		token = l.NextToken()
+
+		if token.Type != lexer.TOKEN_TABLE {
+			return nil, ErrorInvalidSyntax
+		}
+
+		token = l.NextToken()
+
+		if token.Type != lexer.TOKEN_IDENT {
+			return nil, ErrorInvalidSyntax
+		}
+
+		query.Table = token.Value
+
+		token = l.NextToken()
+
+		if token.Type != lexer.TOKEN_LPAREN {
+			return nil, ErrorInvalidSyntax
+		}
+
+		columns := make([]string, 0)
+		token = l.NextToken()
+
+		for token.Type != lexer.TOKEN_RPAREN && token.Type != lexer.TOKEN_EOF {
+
+			if token.Type == lexer.TOKEN_COMMA {
+				token = l.NextToken()
+				continue
+			}
+
+			if token.Type == lexer.TOKEN_EOF {
+				break
+			}
+
+			columns = append(columns, token.Value)
+			token = l.NextToken()
+		}
+
+		query.Columns = columns
+		return query, nil
+
 	case lexer.TOKEN_SELECT:
 		query.Type = "select"
 
@@ -261,6 +306,25 @@ func Parse(input string) (*Query, error) {
 		}
 
 		query.Updates = updates
+
+		if token.Type == lexer.TOKEN_EOF {
+			return query, nil
+		}
+
+		if token.Type != lexer.TOKEN_WHERE {
+			return nil, ErrorInvalidSyntax
+		}
+
+		token = l.NextToken()
+
+		filters, err := parseFilters(l, token)
+
+		if err != nil {
+			return nil, err
+		}
+
+		query.Filters = filters
+		return query, nil
 
 	}
 	return nil, nil
