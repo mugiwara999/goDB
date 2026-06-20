@@ -124,4 +124,12 @@ func (p *Page) GetRow(slotID int) []byte {
 	return data
 
 }
-func (p *Page) IsFull(dataLen int) bool // check if row fits
+
+func (p *Page) CanFit(dataLen int) bool {
+
+	freeStart := int(binary.LittleEndian.Uint16(p.Data[2:4]))
+	freeEnd := int(binary.LittleEndian.Uint16(p.Data[4:6]))
+
+	return (freeEnd - freeStart) >= dataLen+4
+
+}
