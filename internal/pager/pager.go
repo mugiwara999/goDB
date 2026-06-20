@@ -1,6 +1,10 @@
 package pager
 
-import "os"
+import (
+	"encoding/binary"
+	"os"
+	// "strings"
+)
 
 type Pager struct {
 	file     *os.File
@@ -69,4 +73,68 @@ func (p *Pager) Flush(page *Page) error {
 
 	return WritePage(p.file, page)
 
+}
+
+// meta data
+// Bytes 0-3   : GODB
+// Bytes 4-5   : version
+// Bytes 6-9  : numPages
+// Bytes 10+ : column names (null-terminated strings)
+
+func (p *Pager) GetColumns() []string {
+	page, err := p.GetPage(0)
+
+	if err != nil || page == nil {
+		return nil
+	}
+
+	info, err := p.file.Stat()
+
+	if err != nil {
+		return nil
+	}
+
+	numCols := int(info.Size() / PAGE_SIZE)
+
+	cols := make([]string, numCols)
+
+	accumulator := make([]byte, 0)
+
+	colIdx := 0
+
+	for i := 12; i < PAGE_SIZE && colIdx < numCols; i++ {
+		if page.Data[i] == 0 {
+			cols[colIdx] = string(accumulator)
+			accumulator = accumulator[:0]
+			colIdx++
+		}
+		accumulator = append(accumulator, page.Data[i])
+	}
+
+	return cols
+
+}
+
+func (p *Pager) WriteColumns(cols []string) error {
+	page, _ := p.NewPage() // page 0
+
+	binary.LittleEndian.PutUint32(page.Data[:4], uint32(0x474f4442)) // "GODB"
+	binary.LittleEndian.PutUint16(page.Data[4:6], uint16(1))         // version
+	binary.LittleEndian.PutUint16(page.Data[6:8], uint16(len(cols)))
+	binary.LittleEndian.PutUint32(page.Data[8:12], uint32(p.numPages))
+
+	offset := 12
+
+	for _, col := range cols {
+		copy(page.Data[offset:], []byte(col))
+		offset += len(col)
+		page.Data[offset] = 0
+		offset++
+	}
+
+	return p.Flush(page)
+}
+
+func (p *Pager) Close() error {
+	return p.file.Close()
 }

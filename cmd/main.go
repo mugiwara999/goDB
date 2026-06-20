@@ -17,6 +17,7 @@ var tableInstance *table.Table
 
 func main() {
 	fmt.Println("DB is starting")
+	// TODO : Verify database and version
 	var command string
 	// var err error
 	fmt.Print(">")

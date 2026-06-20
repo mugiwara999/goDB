@@ -1,17 +1,17 @@
 package table
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/joho/godotenv"
+	"github.com/mugiwara999/goDB/internal/pager"
 )
 
 type Table struct {
-	file *os.File
-	cols []string
+	Pager *pager.Pager
+	cols  []string
 }
 
 var (
@@ -25,6 +25,7 @@ var (
 
 func Open(name string) (*Table, error) {
 
+	// TODO : env load is duplicated
 	err := godotenv.Load()
 	var DataDir string
 
@@ -33,21 +34,20 @@ func Open(name string) (*Table, error) {
 	} else {
 		DataDir = os.Getenv("DATA_DIR")
 	}
-	file, err := os.OpenFile(DataDir+"/"+strings.ToLower(name)+".txt", os.O_APPEND|os.O_RDWR, 0644)
+
+	path := DataDir + "/" + strings.ToLower(name) + ".bin"
+
+	pager, err := pager.NewPager(path)
 
 	if err != nil {
-		return nil, err
+		return nil, ErrorCreatingFile
 	}
 
-	fileScanner := bufio.NewScanner(file)
-
-	fileScanner.Scan()
-
-	cols := strings.Split(fileScanner.Text(), ",")
+	cols := pager.GetColumns()
 
 	table := &Table{
-		file: file,
-		cols: cols,
+		Pager: pager,
+		cols:  cols,
 	}
 
 	return table, nil
@@ -63,27 +63,30 @@ func Create(name string, cols []string) (*Table, error) {
 	} else {
 		DataDir = os.Getenv("DATA_DIR")
 	}
-	file, err := os.Create(DataDir + "/" + strings.ToLower(name) + ".txt")
+
+	path := DataDir + "/" + strings.ToLower(name) + ".bin"
+
+	pager, err := pager.NewPager(path)
 
 	if err != nil {
-		return nil, fmt.Errorf(ErrorCreatingFile.Error(), err)
+		return nil, ErrorCreatingFile
 	}
 
-	_, err = file.WriteString(strings.Join(cols, ",") + "\n")
+	err = pager.WriteColumns(cols)
 
 	if err != nil {
-		fmt.Println(ErrorWritingToFile, err)
+		return nil, fmt.Errorf("%w : %w", ErrorWritingToFile, err)
 	}
 
 	table := &Table{
-		file: file,
-		cols: cols,
+		Pager: pager,
+		cols:  cols,
 	}
 	return table, nil
 }
 
 func (t *Table) Close() error {
 
-	return t.file.Close()
+	return t.Pager.Close()
 
 }
