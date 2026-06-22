@@ -57,10 +57,18 @@ func (p *Pager) NewPage() (*Page, error) {
 		ID:   p.numPages,
 		Data: data,
 	}
-
 	page.Init()
-	p.numPages++
+	n, err := p.file.Write(page.Data[:])
 
+	if n != PAGE_SIZE {
+		return nil, ErrorWritingPage
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	p.numPages++
 	return page, nil
 }
 
@@ -131,4 +139,50 @@ func (p *Pager) WriteColumns(cols []string) error {
 
 func (p *Pager) Close() error {
 	return p.file.Close()
+}
+
+func (p *Pager) GetNumPages() int {
+	return p.numPages
+}
+
+type rowIterator struct {
+	pager  *Pager
+	pageID int
+	slotID int
+}
+
+func (p *Pager) RowIterator() *rowIterator {
+	return &rowIterator{
+		pager:  p,
+		pageID: 1,
+		slotID: 0,
+	}
+}
+
+func (it *rowIterator) Next() ([]byte, error) {
+
+	if it.pageID >= it.pager.GetNumPages() {
+		return nil, nil
+	}
+
+	page, err := it.pager.GetPage(it.pageID)
+
+	if err != nil {
+		return nil, err
+	}
+
+	numSlots := int(binary.LittleEndian.Uint16(page.Data[:2]))
+
+	if it.slotID >= numSlots {
+		it.pageID++
+		it.slotID = 0
+		return it.Next()
+	}
+
+	row := page.GetRow(it.slotID)
+
+	it.slotID++
+
+	return row, nil
+
 }

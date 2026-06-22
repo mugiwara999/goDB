@@ -205,6 +205,7 @@ func Parse(input string) (*Query, error) {
 		return query, nil
 
 	case lexer.TOKEN_INSERT:
+		query.Type = "insert"
 
 		token = l.NextToken()
 
