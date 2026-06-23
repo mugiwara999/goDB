@@ -2,7 +2,9 @@ package pager
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 )
 
@@ -14,9 +16,15 @@ type Page struct {
 }
 
 var (
-	ErrorWritingPage    = fmt.Errorf("could not write full page")
-	ErrorReadingPage    = fmt.Errorf("could not read full page")
-	ErrorNotEnoughSpace = fmt.Errorf("space isn't enough to fit this data")
+	ErrPageFull          = errors.New("page full")
+	ErrInvalidSlot       = errors.New("invalid slot")
+	ErrInvalidPageID     = errors.New("invalid page id")
+	ErrCorruptPageHeader = errors.New("corrupt page header")
+	ErrCorruptPageData   = errors.New("corrupt page data")
+	ErrMetadataCorrupt   = errors.New("corrupt table metadata")
+	ErrorWritingPage     = errors.New("write page")
+	ErrorReadingPage     = errors.New("read page")
+	ErrorNotEnoughSpace  = ErrPageFull
 )
 
 // Bytes 0-1:   numSlots  (how many rows on this page)
@@ -40,55 +48,55 @@ func WritePage(file *os.File, page *Page) error {
 	_, err := file.Seek(int64(page.ID)*PAGE_SIZE, 0)
 
 	if err != nil {
-		return err
+		return fmt.Errorf("write page %d: %w", page.ID, err)
 	}
 
 	n, err := file.Write(page.Data[:])
 
 	if err != nil {
-		return err
+		return fmt.Errorf("write page %d: %w", page.ID, err)
 	}
 
 	if n < PAGE_SIZE {
-		return ErrorWritingPage
+		return fmt.Errorf("write page %d: %w (wrote %d of %d bytes)", page.ID, ErrorWritingPage, n, PAGE_SIZE)
 	}
 
 	return nil
 }
 
 func ReadPage(file *os.File, pageID int) ([]byte, error) {
+	if pageID < 0 {
+		return nil, fmt.Errorf("read page %d: %w", pageID, ErrInvalidPageID)
+	}
 
 	_, err := file.Seek(int64(pageID)*PAGE_SIZE, 0)
 
 	if err != nil {
-		return nil, ErrorReadingPage
+		return nil, fmt.Errorf("read page %d: %w", pageID, err)
 	}
 
 	data := make([]byte, PAGE_SIZE)
 
-	n, err := file.Read(data)
-
-	if n != PAGE_SIZE {
-		return nil, fmt.Errorf("%w : Read only %d bytes", ErrorReadingPage, n)
-	}
+	n, err := io.ReadFull(file, data)
 
 	if err != nil {
-		return nil, fmt.Errorf("%w : %w", ErrorReadingPage, err)
+		return nil, fmt.Errorf("read page %d: %w", pageID, err)
+	}
+
+	if n != PAGE_SIZE {
+		return nil, fmt.Errorf("read page %d: %w (read %d of %d bytes)", pageID, ErrorReadingPage, n, PAGE_SIZE)
 	}
 	return data, nil
 }
 
 func (p *Page) AddRow(data []byte) error {
-
-	// numSlots := int(p.Data[0]) | int(p.Data[1])<<8
-	numSlots := int(binary.LittleEndian.Uint16(p.Data[:2]))
-	// freeStart := int(p.Data[2]) | int(p.Data[3])<<8
-	freeStart := int(binary.LittleEndian.Uint16(p.Data[2:4]))
-	// freeEnd := int(p.Data[4]) | int(p.Data[5])<<8
-	freeEnd := int(binary.LittleEndian.Uint16(p.Data[4:6]))
+	numSlots, freeStart, freeEnd, err := p.headerValues()
+	if err != nil {
+		return err
+	}
 
 	if freeEnd-freeStart < len(data)+5 {
-		return ErrorNotEnoughSpace
+		return fmt.Errorf("add row to page %d: %w (need %d bytes, have %d bytes)", p.ID, ErrPageFull, len(data)+5, freeEnd-freeStart)
 	}
 
 	start := freeEnd - len(data)
@@ -96,7 +104,7 @@ func (p *Page) AddRow(data []byte) error {
 	n := copy(p.Data[start:freeEnd], data)
 
 	if n != len(data) {
-		return fmt.Errorf("%w : Read only %d bytes", ErrorWritingPage, n)
+		return fmt.Errorf("add row to page %d: %w (copied %d of %d bytes)", p.ID, ErrorWritingPage, n, len(data))
 	}
 
 	numSlots++ // increase num of rows
@@ -119,27 +127,44 @@ func (p *Page) AddRow(data []byte) error {
 
 }
 
-func (p *Page) GetRow(slotID int) []byte {
-	slotPos := 6 + slotID*5
+func (p *Page) GetRow(slotID int) ([]byte, error) {
+	slotPos, err := p.slotPos(slotID)
+	if err != nil {
+		return nil, err
+	}
+
+	if p.Data[slotPos+4] == 1 {
+		return nil, fmt.Errorf("read row from page %d slot %d: %w", p.ID, slotID, ErrInvalidSlot)
+	}
+
 	offset := int(binary.LittleEndian.Uint16(p.Data[slotPos : slotPos+2]))
 	size := int(binary.LittleEndian.Uint16(p.Data[slotPos+2 : slotPos+4]))
 
-	data := p.Data[offset : offset+size]
+	if offset < 0 || size < 0 || offset > PAGE_SIZE || size > PAGE_SIZE || offset+size > PAGE_SIZE {
+		return nil, fmt.Errorf("read row from page %d slot %d: %w (offset=%d size=%d)", p.ID, slotID, ErrCorruptPageData, offset, size)
+	}
 
-	return data
+	data := make([]byte, size)
+	copy(data, p.Data[offset:offset+size])
+
+	return data, nil
 
 }
 
-func (p *Page) DeleteRow(slotID int) {
-	offsetPos := 6 + slotID*5
+func (p *Page) DeleteRow(slotID int) error {
+	offsetPos, err := p.slotPos(slotID)
+	if err != nil {
+		return err
+	}
 	p.Data[offsetPos+4] = 1
+	return nil
 }
 
 func (p *Page) CanFit(dataLen int) bool {
-
-	freeStart := int(binary.LittleEndian.Uint16(p.Data[2:4]))
-	freeEnd := int(binary.LittleEndian.Uint16(p.Data[4:6]))
-
+	_, freeStart, freeEnd, err := p.headerValues()
+	if err != nil {
+		return false
+	}
 	return (freeEnd - freeStart) >= dataLen+5
 
 }
@@ -154,12 +179,54 @@ func (p *Page) isDeleted(slotId int) bool {
 }
 
 func (p *Page) Overwrite(slotId int, data []byte) error {
-	offset := 6 + slotId*5
+	offset, err := p.slotPos(slotId)
+	if err != nil {
+		return err
+	}
 	size := int(binary.LittleEndian.Uint16(p.Data[offset+2 : offset+4]))
 	if len(data) > size {
-		return fmt.Errorf("data too large for slot")
+		return fmt.Errorf("overwrite page %d slot %d: %w (new size %d exceeds %d)", p.ID, slotId, ErrPageFull, len(data), size)
 	}
 	start := int(binary.LittleEndian.Uint16(p.Data[offset : offset+2]))
+	if start < 0 || start+len(data) > PAGE_SIZE {
+		return fmt.Errorf("overwrite page %d slot %d: %w (offset=%d len=%d)", p.ID, slotId, ErrCorruptPageData, start, len(data))
+	}
 	copy(p.Data[start:start+len(data)], data)
 	return nil
+}
+
+func (p *Page) headerValues() (numSlots, freeStart, freeEnd int, err error) {
+	numSlots = int(binary.LittleEndian.Uint16(p.Data[:2]))
+	freeStart = int(binary.LittleEndian.Uint16(p.Data[2:4]))
+	freeEnd = int(binary.LittleEndian.Uint16(p.Data[4:6]))
+
+	expectedFreeStart := 6 + numSlots*5
+	if freeStart != expectedFreeStart || freeStart < 6 || freeStart > PAGE_SIZE || freeEnd > PAGE_SIZE {
+		return 0, 0, 0, fmt.Errorf("page %d header: %w (numSlots=%d freeStart=%d freeEnd=%d)", p.ID, ErrCorruptPageHeader, numSlots, freeStart, freeEnd)
+	}
+
+	if freeStart > freeEnd+1 {
+		return 0, 0, 0, fmt.Errorf("page %d header: %w (freeStart=%d freeEnd=%d)", p.ID, ErrCorruptPageHeader, freeStart, freeEnd)
+	}
+
+	return numSlots, freeStart, freeEnd, nil
+}
+
+func (p *Page) slotPos(slotID int) (int, error) {
+	numSlots, _, _, err := p.headerValues()
+	if err != nil {
+		return 0, err
+	}
+	if slotID < 0 || slotID >= numSlots {
+		return 0, fmt.Errorf("page %d slot %d: %w (numSlots=%d)", p.ID, slotID, ErrInvalidSlot, numSlots)
+	}
+	return 6 + slotID*5, nil
+}
+
+func (p *Page) FreeSpace() (int, error) {
+	_, freeStart, freeEnd, err := p.headerValues()
+	if err != nil {
+		return 0, err
+	}
+	return freeEnd - freeStart, nil
 }

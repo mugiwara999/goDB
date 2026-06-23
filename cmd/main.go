@@ -11,182 +11,139 @@ import (
 	"github.com/mugiwara999/goDB/internal/table"
 )
 
-var scanner *bufio.Scanner
-
-var tableInstance *table.Table
-
 func main() {
+	scanner := bufio.NewScanner(os.Stdin)
 	fmt.Println("DB is starting")
-	// TODO : Verify database and version
-	var command string
-	// var err error
 	fmt.Print(">")
-	scanner = bufio.NewScanner(os.Stdin)
-	if scanner.Err() != nil {
-		fmt.Println(table.ErrorTakingInput, scanner.Err())
-	}
+
 	for scanner.Scan() {
-		if scanner.Err() != nil {
-			fmt.Println(table.ErrorTakingInput, scanner.Err())
-		}
-		command = scanner.Text()
+		command := strings.TrimSpace(scanner.Text())
 		if command == "" {
 			fmt.Print(">")
 			continue
 		}
-		query, err := parser.Parse(strings.ToLower(command))
+
+		query, err := parser.Parse(command)
 		if err != nil {
-			fmt.Println("Error parsing query:", err)
+			fmt.Println(err)
 			fmt.Print(">")
 			continue
 		}
+
 		if query == nil {
-			fmt.Println("Error parsing query:", err)
-			continue
-		}
-		tableInstance, err = table.Open(query.Table)
-		if err != nil && query.Type != "create" {
-			fmt.Println("Error opening table:", err)
 			fmt.Print(">")
 			continue
 		}
+
 		switch query.Type {
-		case "select":
-			filters := []table.ColEq{}
-			for _, v := range query.Filters {
-				colIdx := slices.Index(tableInstance.GetColumns(), v.ColName)
-				if colIdx == -1 {
-					fmt.Println(table.ErrorInvalidInput, "Invalid column name", v.ColName)
-					fmt.Print(">")
-					continue
-				}
-				x := table.ColEq{
-					ColIdx: colIdx,
-					Value:  v.ColValue,
-				}
-				filters = append(filters, x)
-			}
-			res, err := tableInstance.Select(query.Columns, filters)
-			if err != nil {
-				fmt.Println("Error selecting data:", err)
-				fmt.Print(">")
-				continue
-			}
-			for _, row := range res {
-				fmt.Println(strings.Join(row, ","))
-			}
-			tableInstance.Close()
-
-		case "delete":
-			if err != nil {
-				fmt.Println("Error opening table:", err)
-				fmt.Print(">")
-				continue
-			}
-
-			filters := []table.ColEq{}
-			validFilter := true
-			for _, v := range query.Filters {
-				colIdx := slices.Index(tableInstance.GetColumns(), v.ColName)
-				if colIdx == -1 {
-					fmt.Println(table.ErrorInvalidInput, "Invalid column name", v.ColName)
-					validFilter = false
-					break
-				}
-				x := table.ColEq{
-					ColIdx: colIdx,
-					Value:  v.ColValue,
-				}
-				filters = append(filters, x)
-			}
-
-			if !validFilter {
-				tableInstance.Close()
-				fmt.Print(">")
-				continue
-			}
-
-			err = tableInstance.Delete(filters)
-			if err != nil {
-				fmt.Println("Error deleting data:", err)
-				fmt.Print(">")
-				continue
-			}
-			tableInstance.Close()
-
-		case "insert":
-			err = tableInstance.Insert(query.Values)
-
-			if err != nil {
-				fmt.Println("Error inserting data:", err)
-				fmt.Print(">")
-				continue
-			}
-			tableInstance.Close()
-
-		case "update":
-			filters := []table.ColEq{}
-			validFilter := true
-			for _, v := range query.Filters {
-				colIdx := slices.Index(tableInstance.GetColumns(), v.ColName)
-				if colIdx == -1 {
-					fmt.Println(table.ErrorInvalidInput, "Invalid column name", v.ColName)
-					validFilter = false
-					break
-				}
-				x := table.ColEq{
-					ColIdx: colIdx,
-					Value:  v.ColValue,
-				}
-				filters = append(filters, x)
-			}
-
-			if !validFilter {
-				tableInstance.Close()
-				fmt.Print(">")
-				continue
-			}
-
-			updates := []table.UpdateValue{}
-			validUpdate := true
-			for _, v := range query.Updates {
-
-				colIdx := slices.Index(tableInstance.GetColumns(), v.ColName)
-				if colIdx == -1 {
-					fmt.Println(table.ErrorInvalidInput, "Invalid column name", v.ColName)
-					validUpdate = false
-					break
-				}
-				x := table.UpdateValue{
-					ColIdx: colIdx,
-					Value:  v.ColValue,
-				}
-				updates = append(updates, x)
-			}
-
-			if !validUpdate {
-				tableInstance.Close()
-				fmt.Print(">")
-				continue
-			}
-
-			err = tableInstance.Update(filters, updates)
-			if err != nil {
-				fmt.Println("Error updating data:", err)
-				fmt.Print(">")
-				continue
-			}
-			tableInstance.Close()
-
 		case "create":
-			_, err = table.Create(query.Table, query.Columns)
+			tbl, err := table.Create(query.Table, query.Columns)
 			if err != nil {
-				fmt.Println("Error creating table:", err)
-				fmt.Print(">")
-				continue
+				fmt.Println(err)
+				break
+			}
+			if err := tbl.Close(); err != nil {
+				fmt.Println(err)
 			}
 
+		case "insert", "select", "delete", "update":
+			tbl, err := table.Open(query.Table)
+			if err != nil {
+				fmt.Println(err)
+				break
+			}
+
+			switch query.Type {
+			case "insert":
+				if err := tbl.Insert(query.Values); err != nil {
+					fmt.Println(err)
+				}
+			case "select":
+				filters, err := resolveFilters(tbl, query.Filters)
+				if err != nil {
+					fmt.Println(err)
+					break
+				}
+				res, err := tbl.Select(query.Columns, filters)
+				if err != nil {
+					fmt.Println(err)
+					break
+				}
+				for _, row := range res {
+					fmt.Println(strings.Join(row, ","))
+				}
+			case "delete":
+				filters, err := resolveFilters(tbl, query.Filters)
+				if err != nil {
+					fmt.Println(err)
+					break
+				}
+				if err := tbl.Delete(filters); err != nil {
+					fmt.Println(err)
+				}
+			case "update":
+				filters, err := resolveFilters(tbl, query.Filters)
+				if err != nil {
+					fmt.Println(err)
+					break
+				}
+				updates, err := resolveUpdates(tbl, query.Updates)
+				if err != nil {
+					fmt.Println(err)
+					break
+				}
+				if err := tbl.Update(filters, updates); err != nil {
+					fmt.Println(err)
+				}
+			}
+
+			if err := tbl.Close(); err != nil {
+				fmt.Println(err)
+			}
+		default:
+			fmt.Printf("unsupported query type %q\n", query.Type)
 		}
+
 		fmt.Print(">")
 	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Println(table.ErrorTakingInput, err)
+	}
+}
+
+func resolveFilters(tbl *table.Table, filters []parser.Pair) ([]table.ColEq, error) {
+	resolved := make([]table.ColEq, 0, len(filters))
+	columns := tbl.GetColumns()
+
+	for _, f := range filters {
+		colIdx := slices.Index(columns, f.ColName)
+		if colIdx == -1 {
+			return nil, fmt.Errorf("table %q: column %q does not exist", tbl.Name, f.ColName)
+		}
+		resolved = append(resolved, table.ColEq{
+			ColIdx: colIdx,
+			Value:  f.ColValue,
+		})
+	}
+
+	return resolved, nil
+}
+
+func resolveUpdates(tbl *table.Table, updates []parser.Pair) ([]table.UpdateValue, error) {
+	resolved := make([]table.UpdateValue, 0, len(updates))
+	columns := tbl.GetColumns()
+
+	for _, u := range updates {
+		colIdx := slices.Index(columns, u.ColName)
+		if colIdx == -1 {
+			return nil, fmt.Errorf("table %q: column %q does not exist", tbl.Name, u.ColName)
+		}
+		resolved = append(resolved, table.UpdateValue{
+			ColIdx: colIdx,
+			Value:  u.ColValue,
+		})
+	}
+
+	return resolved, nil
 }

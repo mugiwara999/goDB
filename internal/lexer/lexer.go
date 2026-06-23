@@ -1,6 +1,9 @@
 package lexer
 
-import "strings"
+import (
+	"strings"
+	"unicode"
+)
 
 type TokenType int
 
@@ -85,7 +88,7 @@ func (l *Lexer) NextToken() Token {
 }
 
 func (l *Lexer) skipWhitespace() {
-	for l.pos < len(l.input) && l.input[l.pos] == ' ' {
+	for l.pos < len(l.input) && unicode.IsSpace(rune(l.input[l.pos])) {
 		l.pos++
 	}
 }
@@ -96,10 +99,12 @@ func (l *Lexer) readString() Token {
 	for l.pos < len(l.input) && l.input[l.pos] != '\'' {
 		l.pos++
 	}
-	val := l.input[start:l.pos]
-	if l.input[l.pos] != '\'' {
-		return Token{TOKEN_ILLEGAL, "unterminated string"}
+
+	if l.pos >= len(l.input) {
+		return Token{TOKEN_ILLEGAL, "unterminated string literal"}
 	}
+
+	val := l.input[start:l.pos]
 	l.pos++ // skip closing '
 	return Token{TOKEN_STRING, val}
 }

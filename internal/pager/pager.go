@@ -2,49 +2,65 @@ package pager
 
 import (
 	"encoding/binary"
+	"fmt"
 	"os"
-	// "strings"
 )
 
 type Pager struct {
 	file     *os.File
+	path     string
 	numPages int
 }
 
 // page 0 for meta data
 
 func NewPager(path string) (*Pager, error) {
-	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0644)
+	return CreatePager(path)
+}
+
+func OpenPager(path string) (*Pager, error) {
+	return openPager(path, os.O_RDWR)
+}
+
+func CreatePager(path string) (*Pager, error) {
+	return openPager(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC)
+}
+
+func openPager(path string, flags int) (*Pager, error) {
+	file, err := os.OpenFile(path, flags, 0644)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open pager %q: %w", path, err)
 	}
 	info, err := file.Stat()
 	if err != nil {
-		return nil, err
+		_ = file.Close()
+		return nil, fmt.Errorf("stat pager %q: %w", path, err)
+	}
+	if info.Size()%PAGE_SIZE != 0 {
+		_ = file.Close()
+		return nil, fmt.Errorf("open pager %q: %w (file size %d is not a multiple of page size %d)", path, ErrCorruptPageData, info.Size(), PAGE_SIZE)
 	}
 	numPages := int(info.Size()) / PAGE_SIZE
-	return &Pager{file: file, numPages: numPages}, nil
+	return &Pager{file: file, path: path, numPages: numPages}, nil
 }
 
 func (p *Pager) GetPage(pageID int) (*Page, error) {
-	offset := pageID * PAGE_SIZE
-	_, err := p.file.Seek(int64(offset), 0)
-
-	if err != nil {
-		return nil, ErrorReadingPage
+	if pageID < 0 || pageID >= p.numPages {
+		return nil, fmt.Errorf("get page %d from %q: %w (page count=%d)", pageID, p.path, ErrInvalidPageID, p.numPages)
 	}
 
-	data := [PAGE_SIZE]byte{}
-
-	_, err = p.file.Read(data[:])
+	data, err := ReadPage(p.file, pageID)
 
 	if err != nil {
-		return nil, ErrorReadingPage
+		return nil, fmt.Errorf("get page %d from %q: %w", pageID, p.path, err)
 	}
+
+	var pageData [PAGE_SIZE]byte
+	copy(pageData[:], data)
 
 	page := &Page{
 		ID:   pageID,
-		Data: data,
+		Data: pageData,
 	}
 
 	return page, nil
@@ -58,14 +74,8 @@ func (p *Pager) NewPage() (*Page, error) {
 		Data: data,
 	}
 	page.Init()
-	n, err := p.file.Write(page.Data[:])
-
-	if n != PAGE_SIZE {
-		return nil, ErrorWritingPage
-	}
-
-	if err != nil {
-		return nil, err
+	if err := WritePage(p.file, page); err != nil {
+		return nil, fmt.Errorf("allocate page %d in %q: %w", page.ID, p.path, err)
 	}
 
 	p.numPages++
@@ -73,8 +83,13 @@ func (p *Pager) NewPage() (*Page, error) {
 }
 
 func (p *Pager) Flush(page *Page) error {
-
-	return WritePage(p.file, page)
+	if page == nil {
+		return fmt.Errorf("flush page in %q: %w", p.path, ErrInvalidPageID)
+	}
+	if err := WritePage(p.file, page); err != nil {
+		return fmt.Errorf("flush page %d to %q: %w", page.ID, p.path, err)
+	}
+	return nil
 
 }
 
@@ -84,16 +99,22 @@ func (p *Pager) Flush(page *Page) error {
 // Bytes 6-9  : numCols
 // Bytes 10+ : column names (null-terminated strings)
 
-func (p *Pager) GetColumns() []string {
+func (p *Pager) GetColumns() ([]string, error) {
 	if p.numPages == 0 {
-		return nil
+		return nil, fmt.Errorf("read table metadata from %q: %w (metadata page is missing)", p.path, ErrMetadataCorrupt)
 	}
 	page, err := p.GetPage(0)
 
 	if err != nil || page == nil {
-		return nil
+		return nil, fmt.Errorf("read table metadata from %q: %w", p.path, err)
 	}
 
+	if binary.LittleEndian.Uint32(page.Data[:4]) != 0x474f4442 {
+		return nil, fmt.Errorf("read table metadata from %q: %w (invalid magic)", p.path, ErrMetadataCorrupt)
+	}
+	if binary.LittleEndian.Uint16(page.Data[4:6]) != 1 {
+		return nil, fmt.Errorf("read table metadata from %q: %w (unsupported version %d)", p.path, ErrMetadataCorrupt, binary.LittleEndian.Uint16(page.Data[4:6]))
+	}
 	numCols := int(binary.LittleEndian.Uint32(page.Data[6:10]))
 
 	cols := make([]string, numCols)
@@ -114,31 +135,55 @@ func (p *Pager) GetColumns() []string {
 		accumulator = append(accumulator, page.Data[i])
 	}
 
-	return cols
+	if colIdx != numCols {
+		return nil, fmt.Errorf("read table metadata from %q: %w (expected %d columns, found %d)", p.path, ErrMetadataCorrupt, numCols, colIdx)
+	}
+
+	return cols, nil
 
 }
 
 func (p *Pager) WriteColumns(cols []string) error {
-	page, _ := p.NewPage() // page 0
+	if len(cols) == 0 {
+		return fmt.Errorf("write table metadata to %q: at least one column is required", p.path)
+	}
+	page, err := p.NewPage() // page 0
+	if err != nil {
+		return fmt.Errorf("write table metadata to %q: %w", p.path, err)
+	}
 
 	binary.LittleEndian.PutUint32(page.Data[:4], uint32(0x474f4442)) // "GODB"
 	binary.LittleEndian.PutUint16(page.Data[4:6], uint16(1))         // version
 	binary.LittleEndian.PutUint32(page.Data[6:10], uint32(len(cols)))
 
 	offset := 10
+	required := offset
 
 	for _, col := range cols {
+		required += len(col) + 1
+		if required > PAGE_SIZE {
+			return fmt.Errorf("write table metadata to %q: %w (need %d bytes, page size is %d)", p.path, ErrPageFull, required, PAGE_SIZE)
+		}
 		copy(page.Data[offset:], []byte(col))
 		offset += len(col)
 		page.Data[offset] = 0
 		offset++
 	}
 
-	return p.Flush(page)
+	if err := p.Flush(page); err != nil {
+		return fmt.Errorf("write table metadata to %q: %w", p.path, err)
+	}
+	return nil
 }
 
 func (p *Pager) Close() error {
-	return p.file.Close()
+	if p == nil || p.file == nil {
+		return nil
+	}
+	if err := p.file.Close(); err != nil {
+		return fmt.Errorf("close pager %q: %w", p.path, err)
+	}
+	return nil
 }
 
 func (p *Pager) GetNumPages() int {
@@ -160,33 +205,38 @@ func (p *Pager) RowIterator() *rowIterator {
 }
 
 func (it *rowIterator) Next() ([]byte, error) {
+	for {
+		it.slotID++
+		if it.pageID >= it.pager.GetNumPages() {
+			return nil, nil
+		}
 
-	it.slotID++
-	if it.pageID >= it.pager.GetNumPages() {
-		return nil, nil
+		page, err := it.pager.GetPage(it.pageID)
+		if err != nil {
+			return nil, fmt.Errorf("iterate rows at page %d slot %d: %w", it.pageID, it.slotID, err)
+		}
+
+		numSlots, _, _, err := page.headerValues()
+		if err != nil {
+			return nil, fmt.Errorf("iterate rows at page %d slot %d: %w", it.pageID, it.slotID, err)
+		}
+		if it.slotID >= numSlots {
+			it.pageID++
+			it.slotID = -1
+			continue
+		}
+
+		if page.isDeleted(it.slotID) {
+			continue
+		}
+
+		row, err := page.GetRow(it.slotID)
+		if err != nil {
+			return nil, fmt.Errorf("iterate rows at page %d slot %d: %w", it.pageID, it.slotID, err)
+		}
+
+		return row, nil
 	}
-
-	page, err := it.pager.GetPage(it.pageID)
-
-	if err != nil {
-		return nil, err
-	}
-
-	numSlots := int(binary.LittleEndian.Uint16(page.Data[:2]))
-
-	if it.slotID >= numSlots {
-		it.pageID++
-		it.slotID = -1
-		return it.Next()
-	}
-
-	if page.isDeleted(it.slotID) {
-		return it.Next()
-
-	}
-	row := page.GetRow(it.slotID)
-
-	return row, nil
 
 }
 

@@ -1,6 +1,7 @@
 package table
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -11,82 +12,89 @@ import (
 
 type Table struct {
 	Pager *pager.Pager
+	Name  string
+	Path  string
 	cols  []string
 }
 
 var (
-	ErrorCreatingFile   = fmt.Errorf("Error creating file")
-	ErrorWritingToFile  = fmt.Errorf("Error writing to file")
-	ErrorReadingFile    = fmt.Errorf("Error reading file")
-	ErrorTakingInput    = fmt.Errorf("Error taking input")
-	ErrorInvalidInput   = fmt.Errorf("Invalid input")
-	ErrorColumnNotFound = fmt.Errorf("Column not found")
+	ErrorTakingInput = errors.New("read user input")
 )
 
 func Open(name string) (*Table, error) {
-
-	// TODO : env load is duplicated
-	err := godotenv.Load()
-	var DataDir string
-
+	path, err := tablePath(name)
 	if err != nil {
-		DataDir = "../data"
-	} else {
-		DataDir = os.Getenv("DATA_DIR")
+		return nil, fmt.Errorf("open table %q: %w", name, err)
 	}
 
-	path := DataDir + "/" + strings.ToLower(name) + ".bin"
-
-	pager, err := pager.NewPager(path)
-
+	pg, err := pager.OpenPager(path)
 	if err != nil {
-		return nil, ErrorCreatingFile
+		return nil, fmt.Errorf("open table %q at %q: %w", name, path, err)
 	}
 
-	cols := pager.GetColumns()
+	cols, err := pg.GetColumns()
+	if err != nil {
+		_ = pg.Close()
+		return nil, fmt.Errorf("open table %q at %q: %w", name, path, err)
+	}
 
-	table := &Table{
-		Pager: pager,
+	return &Table{
+		Pager: pg,
+		Name:  strings.ToLower(name),
+		Path:  path,
 		cols:  cols,
-	}
-
-	return table, nil
-
+	}, nil
 }
+
 func Create(name string, cols []string) (*Table, error) {
-
-	err := godotenv.Load()
-	var DataDir string
-
-	if err != nil {
-		DataDir = "../data"
-	} else {
-		DataDir = os.Getenv("DATA_DIR")
+	if len(cols) == 0 {
+		return nil, fmt.Errorf("create table %q: at least one column name is required", name)
 	}
 
-	path := DataDir + "/" + strings.ToLower(name) + ".bin"
-
-	pager, err := pager.NewPager(path)
-
+	path, err := tablePath(name)
 	if err != nil {
-		return nil, ErrorCreatingFile
+		return nil, fmt.Errorf("create table %q: %w", name, err)
 	}
 
-	err = pager.WriteColumns(cols)
-
+	pg, err := pager.CreatePager(path)
 	if err != nil {
-		return nil, fmt.Errorf("%w : %w", ErrorWritingToFile, err)
+		return nil, fmt.Errorf("create table %q at %q: %w", name, path, err)
 	}
 
-	table := &Table{
-		Pager: pager,
+	if err := pg.WriteColumns(cols); err != nil {
+		_ = pg.Close()
+		return nil, fmt.Errorf("create table %q at %q: %w", name, path, err)
+	}
+
+	return &Table{
+		Pager: pg,
+		Name:  strings.ToLower(name),
+		Path:  path,
 		cols:  cols,
-	}
-	return table, nil
+	}, nil
 }
 
 func (t *Table) Close() error {
-
+	if t == nil || t.Pager == nil {
+		return nil
+	}
 	return t.Pager.Close()
+}
 
+func (t *Table) GetColumns() []string {
+	cols := make([]string, len(t.cols))
+	copy(cols, t.cols)
+	return cols
+}
+
+func tablePath(name string) (string, error) {
+	if err := godotenv.Load(); err != nil {
+		return "../data/" + strings.ToLower(name) + ".bin", nil
+	}
+
+	dataDir := os.Getenv("DATA_DIR")
+	if dataDir == "" {
+		dataDir = "../data"
+	}
+	return dataDir + "/" + strings.ToLower(name) + ".bin", nil
 }
