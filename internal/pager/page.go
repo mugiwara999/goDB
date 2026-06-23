@@ -119,7 +119,7 @@ func (p *Page) AddRow(data []byte) error {
 
 	binary.LittleEndian.PutUint16(p.Data[2:4], uint16(freeStart))
 
-	freeEnd = start - 1
+	freeEnd = start
 
 	binary.LittleEndian.PutUint16(p.Data[4:6], uint16(freeEnd))
 
@@ -205,7 +205,7 @@ func (p *Page) headerValues() (numSlots, freeStart, freeEnd int, err error) {
 		return 0, 0, 0, fmt.Errorf("page %d header: %w (numSlots=%d freeStart=%d freeEnd=%d)", p.ID, ErrCorruptPageHeader, numSlots, freeStart, freeEnd)
 	}
 
-	if freeStart > freeEnd+1 {
+	if freeStart > freeEnd {
 		return 0, 0, 0, fmt.Errorf("page %d header: %w (freeStart=%d freeEnd=%d)", p.ID, ErrCorruptPageHeader, freeStart, freeEnd)
 	}
 
