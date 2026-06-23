@@ -144,111 +144,98 @@ func (t *Table) Select(columns []string, colEquals []ColEq) ([][]string, error) 
 	return result, nil
 }
 
-// func (t *Table) Delete(filters []ColEq) error {
-// 	t.file.Seek(0, 0)
-// 	filescanner := bufio.NewScanner(t.file)
-//
-// 	if filescanner.Err() != nil {
-// 		return filescanner.Err()
-// 	}
-//
-// 	var rows [][]string
-//
-// 	filescanner.Scan() // Skip the first line (column names)
-// 	for filescanner.Scan() {
-// 		rowText := filescanner.Text()
-// 		row := strings.Split(rowText, ",")
-//
-// 		match := true
-// 		for _, v := range filters {
-// 			if row[v.ColIdx] != v.Value {
-//
-// 				match = false
-// 			}
-// 		}
-//
-// 		if !match {
-// 			rows = append(rows, row)
-// 		}
-// 	}
-// 	err := t.Truncate()
-//
-// 	if err != nil {
-// 		return err
-// 	}
-// 	for _, row := range rows {
-// 		t.file.WriteString(strings.Join(row, ",") + "\n")
-// 	}
-// 	return nil
-// }
-//
-// func (t *Table) Truncate() error {
-//
-// 	err := t.file.Truncate(0)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	_, err = t.file.Seek(0, 0)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	_, err = t.file.WriteString(string(strings.Join(t.GetColumns(), ",") + "\n"))
-//
-// 	if err != nil {
-// 		return err
-// 	}
-// 	return nil
-// }
-//
-// func (t *Table) Update(filters []ColEq, toUpdate []UpdateValue) error {
-//
-// 	var rows [][]string
-//
-// 	t.file.Seek(0, 0)
-//
-// 	filescanner := bufio.NewScanner(t.file)
-//
-// 	if filescanner.Err() != nil {
-// 		return filescanner.Err()
-// 	}
-//
-// 	filescanner.Scan()
-//
-// 	for filescanner.Scan() {
-//
-// 		text := filescanner.Text()
-//
-// 		row := strings.Split(text, ",")
-//
-// 		match := true
-//
-// 		for _, v := range filters {
-//
-// 			if row[v.ColIdx] != v.Value {
-// 				match = false
-// 				break
-// 			}
-//
-// 		}
-//
-// 		if match {
-//
-// 			for _, v := range toUpdate {
-// 				row[v.ColIdx] = v.Value
-// 			}
-//
-// 		}
-//
-// 		rows = append(rows, row)
-// 	}
-//
-// 	err := t.Truncate()
-//
-// 	if err != nil {
-// 		return err
-// 	}
-// 	for _, row := range rows {
-// 		t.file.WriteString(strings.Join(row, ",") + "\n")
-// 	}
-// 	return nil
-// }
+func (t *Table) Delete(filters []ColEq) error {
+
+	rowIt := t.Pager.RowIterator()
+
+	for {
+
+		rowText, err := rowIt.Next()
+		if rowText == nil || err != nil {
+			break
+		}
+		row := DeserializeRow(rowText)
+
+		match := true
+		for _, v := range filters {
+			if row[v.ColIdx] != v.Value {
+				match = false
+			}
+		}
+
+		if match {
+			matchInfo := rowIt.GetCurrentInfo()
+			page, err := t.Pager.GetPage(matchInfo.PageID)
+
+			if err != nil {
+				return pager.ErrorReadingPage
+			}
+
+			page.DeleteRow(matchInfo.SlotID)
+
+			err = t.Pager.Flush(page)
+
+		}
+	}
+	return nil
+}
+
+func (t *Table) Update(filters []ColEq, toUpdate []UpdateValue) error {
+
+	rowIt := t.Pager.RowIterator()
+
+	for {
+
+		data, _ := rowIt.Next()
+
+		if data == nil {
+			break
+		}
+
+		row := DeserializeRow(data)
+
+		match := true
+
+		for _, v := range filters {
+
+			if row[v.ColIdx] != v.Value {
+				match = false
+				break
+			}
+
+		}
+
+		if match {
+
+			for _, v := range toUpdate {
+				row[v.ColIdx] = v.Value
+			}
+
+			info := rowIt.GetCurrentInfo()
+
+			newData := SerializeRow(row)
+
+			page, err := t.Pager.GetPage(info.PageID)
+
+			if err != nil {
+				return err
+			}
+
+			if len(newData) == len(data) {
+				page.Overwrite(info.SlotID, newData)
+				t.Pager.Flush(page)
+			} else {
+				page.DeleteRow(info.SlotID)
+				t.Pager.Flush(page)
+				err := t.Insert(row)
+				if err != nil {
+					return err
+				}
+			}
+
+		}
+
+	}
+
+	return nil
+}

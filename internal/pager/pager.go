@@ -155,12 +155,13 @@ func (p *Pager) RowIterator() *rowIterator {
 	return &rowIterator{
 		pager:  p,
 		pageID: 1,
-		slotID: 0,
+		slotID: -1,
 	}
 }
 
 func (it *rowIterator) Next() ([]byte, error) {
 
+	it.slotID++
 	if it.pageID >= it.pager.GetNumPages() {
 		return nil, nil
 	}
@@ -175,14 +176,28 @@ func (it *rowIterator) Next() ([]byte, error) {
 
 	if it.slotID >= numSlots {
 		it.pageID++
-		it.slotID = 0
+		it.slotID = -1
 		return it.Next()
 	}
 
-	row := page.GetRow(it.slotID)
+	if page.isDeleted(it.slotID) {
+		return it.Next()
 
-	it.slotID++
+	}
+	row := page.GetRow(it.slotID)
 
 	return row, nil
 
+}
+
+type RowItInfo struct {
+	PageID int
+	SlotID int
+}
+
+func (it *rowIterator) GetCurrentInfo() RowItInfo {
+	return RowItInfo{
+		PageID: it.pageID,
+		SlotID: it.slotID,
+	}
 }
